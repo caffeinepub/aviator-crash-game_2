@@ -1,0 +1,214 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@font-face {
+  font-family: "GeneralSans";
+  src: url("/assets/fonts/GeneralSans.woff2") format("woff2");
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "JetBrainsMono";
+  src: url("/assets/fonts/JetBrainsMono.woff2") format("woff2");
+  font-display: swap;
+}
+
+@layer base {
+  :root {
+    --radius: 0.75rem;
+    /* Casino dark theme - always dark */
+    --background: 0.09 0.032 258;
+    --foreground: 0.93 0.018 258;
+    --card: 0.14 0.038 258;
+    --card-foreground: 0.93 0.018 258;
+    --popover: 0.17 0.042 258;
+    --popover-foreground: 0.93 0.018 258;
+    /* neon green #9DFF3A */
+    --primary: 0.87 0.22 131;
+    --primary-foreground: 0.08 0.02 258;
+    /* muted blue-gray */
+    --secondary: 0.22 0.05 258;
+    --secondary-foreground: 0.93 0.018 258;
+    --muted: 0.2 0.045 258;
+    --muted-foreground: 0.7 0.038 258;
+    --accent: 0.25 0.055 258;
+    --accent-foreground: 0.93 0.018 258;
+    /* red crash */
+    --destructive: 0.62 0.22 25;
+    --destructive-foreground: 0.93 0.018 258;
+    /* border #24314A */
+    --border: 0.24 0.052 258;
+    --input: 0.2 0.045 258;
+    --ring: 0.87 0.22 131;
+    /* chart colors */
+    --chart-1: 0.87 0.22 131;
+    --chart-2: 0.62 0.22 25;
+    --chart-3: 0.75 0.18 67;
+    --chart-4: 0.7 0.038 258;
+    --chart-5: 0.55 0.12 258;
+    --sidebar: 0.14 0.038 258;
+    --sidebar-foreground: 0.93 0.018 258;
+    --sidebar-primary: 0.87 0.22 131;
+    --sidebar-primary-foreground: 0.08 0.02 258;
+    --sidebar-accent: 0.22 0.05 258;
+    --sidebar-accent-foreground: 0.93 0.018 258;
+    --sidebar-border: 0.24 0.052 258;
+    --sidebar-ring: 0.87 0.22 131;
+  }
+
+  .dark {
+    --background: 0.09 0.032 258;
+    --foreground: 0.93 0.018 258;
+    --card: 0.14 0.038 258;
+    --card-foreground: 0.93 0.018 258;
+    --popover: 0.17 0.042 258;
+    --popover-foreground: 0.93 0.018 258;
+    --primary: 0.87 0.22 131;
+    --primary-foreground: 0.08 0.02 258;
+    --secondary: 0.22 0.05 258;
+    --secondary-foreground: 0.93 0.018 258;
+    --muted: 0.2 0.045 258;
+    --muted-foreground: 0.7 0.038 258;
+    --accent: 0.25 0.055 258;
+    --accent-foreground: 0.93 0.018 258;
+    --destructive: 0.62 0.22 25;
+    --destructive-foreground: 0.93 0.018 258;
+    --border: 0.24 0.052 258;
+    --input: 0.2 0.045 258;
+    --ring: 0.87 0.22 131;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  html {
+    color-scheme: dark;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    font-family: "GeneralSans", system-ui, sans-serif;
+    background: linear-gradient(
+      135deg,
+      oklch(0.09 0.032 258) 0%,
+      oklch(0.07 0.025 260) 100%
+    );
+    min-height: 100vh;
+  }
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+::-webkit-scrollbar-track {
+  background: oklch(0.14 0.038 258);
+}
+::-webkit-scrollbar-thumb {
+  background: oklch(0.24 0.052 258);
+  border-radius: 2px;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* Multiplier glow effects */
+.glow-green {
+  text-shadow: 0 0 20px oklch(0.87 0.22 131 / 0.7), 0 0 40px
+    oklch(0.87 0.22 131 / 0.4), 0 0 80px oklch(0.87 0.22 131 / 0.2);
+}
+.glow-red {
+  text-shadow: 0 0 20px oklch(0.62 0.22 25 / 0.8), 0 0 40px
+    oklch(0.62 0.22 25 / 0.4);
+}
+.glow-orange {
+  text-shadow: 0 0 20px oklch(0.75 0.18 67 / 0.7), 0 0 40px
+    oklch(0.75 0.18 67 / 0.3);
+}
+
+/* Plane crash shake */
+@keyframes planeShake {
+  0%,
+  100% {
+    transform: translateX(0px) translateY(0px);
+  }
+  20% {
+    transform: translateX(-6px) translateY(-3px);
+  }
+  40% {
+    transform: translateX(6px) translateY(3px);
+  }
+  60% {
+    transform: translateX(-4px) translateY(2px);
+  }
+  80% {
+    transform: translateX(4px) translateY(-2px);
+  }
+}
+.plane-shake {
+  animation: planeShake 0.12s linear infinite;
+}
+
+/* Pulse for neon glow border */
+@keyframes neonPulse {
+  0%,
+  100% {
+    box-shadow: 0 0 8px oklch(0.87 0.22 131 / 0.4);
+  }
+  50% {
+    box-shadow: 0 0 20px oklch(0.87 0.22 131 / 0.8), 0 0 40px
+      oklch(0.87 0.22 131 / 0.3);
+  }
+}
+.neon-pulse {
+  animation: neonPulse 1.5s ease-in-out infinite;
+}
+
+/* Countdown pulse */
+@keyframes countdownPulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.7;
+    transform: scale(0.96);
+  }
+}
+.countdown-pulse {
+  animation: countdownPulse 1s ease-in-out infinite;
+}
+
+/* Fade in/out for multiplier */
+@keyframes fadeInScale {
+  from {
+    opacity: 0;
+    transform: scale(0.9);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+.fade-in-scale {
+  animation: fadeInScale 0.3s ease-out forwards;
+}
+
+/* Trail glow */
+@keyframes trailGlow {
+  0%,
+  100% {
+    filter: drop-shadow(0 0 4px #ff3b3b88);
+  }
+  50% {
+    filter: drop-shadow(0 0 8px #ff3b3bcc);
+  }
+}
