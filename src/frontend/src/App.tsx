@@ -12,6 +12,7 @@ import {
 import { cn } from "@/lib/utils";
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useRef, useState } from "react";
+import HomePage from "./HomePage";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 type Phase = "waiting" | "flying" | "crashed";
@@ -23,10 +24,20 @@ interface CrashEntry {
 
 interface BetRecord {
   id: number;
+  slot: 1 | 2;
   betAmount: number;
   cashoutAt: number | null;
   profit: number;
   timestamp: number;
+}
+
+interface BetSlot {
+  betAmount: number;
+  isBetPlaced: boolean;
+  cashedOut: number | null;
+  autoCashout: boolean;
+  autoCashoutTarget: number;
+  autoCashoutInput: string;
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -150,7 +161,7 @@ function StepBtn({
       type="button"
       onClick={onClick}
       disabled={disabled}
-      className="w-10 h-10 rounded-xl bg-[#0d1423] border border-[#24314A] text-white font-bold text-lg hover:bg-[#1a2540] hover:border-[#3a4f6e] transition-all duration-150 disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center"
+      className="w-9 h-9 rounded-xl bg-[#0d1423] border border-[#24314A] text-white font-bold text-lg hover:bg-[#1a2540] hover:border-[#3a4f6e] transition-all duration-150 disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center"
     >
       {children}
     </button>
@@ -172,15 +183,27 @@ function Chip({
       type="button"
       onClick={onClick}
       disabled={disabled}
-      className="px-3 py-1.5 rounded-lg bg-[#0d1423] border border-[#24314A] text-sm font-semibold text-[#9AA7BD] hover:border-[#9DFF3A]/40 hover:text-[#9DFF3A] transition-all duration-150 disabled:opacity-30 disabled:cursor-not-allowed"
+      className="px-2 py-1 rounded-lg bg-[#0d1423] border border-[#24314A] text-xs font-semibold text-[#9AA7BD] hover:border-[#9DFF3A]/40 hover:text-[#9DFF3A] transition-all duration-150 disabled:opacity-30 disabled:cursor-not-allowed"
     >
       {label}
     </button>
   );
 }
 
+// ─── Default Bet Slot ─────────────────────────────────────────────────────────
+function defaultSlot(): BetSlot {
+  return {
+    betAmount: 50,
+    isBetPlaced: false,
+    cashedOut: null,
+    autoCashout: false,
+    autoCashoutTarget: 2.0,
+    autoCashoutInput: "2.00",
+  };
+}
+
 // ─── Main App ─────────────────────────────────────────────────────────────────
-export default function App() {
+function AviatorGame() {
   // Game state
   const [phase, setPhase] = useState<Phase>("waiting");
   const [multiplier, setMultiplier] = useState(1.0);
@@ -200,12 +223,39 @@ export default function App() {
       return 1000;
     }
   });
-  const [betAmount, setBetAmount] = useState(50);
-  const [isBetPlaced, setIsBetPlaced] = useState(false);
-  const [cashedOut, setCashedOut] = useState<number | null>(null);
-  const [autoCashout, setAutoCashout] = useState(false);
-  const [autoCashoutTarget, setAutoCashoutTarget] = useState(2.0);
-  const [autoCashoutInput, setAutoCashoutInput] = useState("2.00");
+
+  // Deposit/Withdrawal modal
+  const [showWalletModal, setShowWalletModal] = useState(false);
+  const [walletTab, setWalletTab] = useState<"deposit" | "withdraw">("deposit");
+  const [walletAmount, setWalletAmount] = useState("");
+  const [walletMsg, setWalletMsg] = useState<{
+    type: "ok" | "err";
+    text: string;
+  } | null>(null);
+
+  // Dual bet slots
+  const [bet1, setBet1] = useState<BetSlot>(() => {
+    try {
+      const s = localStorage.getItem("av_bet1_amount");
+      const v = s ? Number.parseFloat(s) : Number.NaN;
+      const slot = defaultSlot();
+      if (!Number.isNaN(v) && v > 0) slot.betAmount = v;
+      return slot;
+    } catch {
+      return defaultSlot();
+    }
+  });
+  const [bet2, setBet2] = useState<BetSlot>(() => {
+    try {
+      const s = localStorage.getItem("av_bet2_amount");
+      const v = s ? Number.parseFloat(s) : Number.NaN;
+      const slot = defaultSlot();
+      if (!Number.isNaN(v) && v > 0) slot.betAmount = v;
+      return slot;
+    } catch {
+      return defaultSlot();
+    }
+  });
 
   // History
   const [crashHistory, setCrashHistory] = useState<CrashEntry[]>(() => {
@@ -236,6 +286,7 @@ export default function App() {
     return [
       {
         id: 3,
+        slot: 1 as const,
         betAmount: 25,
         cashoutAt: 1.87,
         profit: 21.75,
@@ -243,6 +294,7 @@ export default function App() {
       },
       {
         id: 2,
+        slot: 2 as const,
         betAmount: 100,
         cashoutAt: null,
         profit: -100,
@@ -250,6 +302,7 @@ export default function App() {
       },
       {
         id: 1,
+        slot: 1 as const,
         betAmount: 50,
         cashoutAt: 2.34,
         profit: 67,
@@ -260,11 +313,19 @@ export default function App() {
 
   // Refs for animation loop
   const balanceRef = useRef(balance);
-  const betAmountRef = useRef(betAmount);
-  const isBetPlacedRef = useRef(false);
-  const cashedOutRef = useRef<number | null>(null);
-  const autoCashoutRef = useRef(false);
-  const autoCashoutTargetRef = useRef(2.0);
+  // Slot 1 refs
+  const isBetPlacedRef1 = useRef(false);
+  const cashedOutRef1 = useRef<number | null>(null);
+  const betAmountRef1 = useRef(bet1.betAmount);
+  const autoCashoutRef1 = useRef(false);
+  const autoCashoutTargetRef1 = useRef(2.0);
+  // Slot 2 refs
+  const isBetPlacedRef2 = useRef(false);
+  const cashedOutRef2 = useRef<number | null>(null);
+  const betAmountRef2 = useRef(bet2.betAmount);
+  const autoCashoutRef2 = useRef(false);
+  const autoCashoutTargetRef2 = useRef(2.0);
+
   const crashPointRef = useRef(0);
   const phaseRef = useRef<Phase>("waiting");
 
@@ -273,19 +334,26 @@ export default function App() {
     balanceRef.current = balance;
   }, [balance]);
   useEffect(() => {
-    betAmountRef.current = betAmount;
-  }, [betAmount]);
+    betAmountRef1.current = bet1.betAmount;
+    autoCashoutRef1.current = bet1.autoCashout;
+    autoCashoutTargetRef1.current = bet1.autoCashoutTarget;
+  }, [bet1]);
   useEffect(() => {
-    autoCashoutRef.current = autoCashout;
-  }, [autoCashout]);
-  useEffect(() => {
-    autoCashoutTargetRef.current = autoCashoutTarget;
-  }, [autoCashoutTarget]);
+    betAmountRef2.current = bet2.betAmount;
+    autoCashoutRef2.current = bet2.autoCashout;
+    autoCashoutTargetRef2.current = bet2.autoCashoutTarget;
+  }, [bet2]);
 
   // Persist
   useEffect(() => {
     localStorage.setItem("av_balance", String(balance));
   }, [balance]);
+  useEffect(() => {
+    localStorage.setItem("av_bet1_amount", String(bet1.betAmount));
+  }, [bet1.betAmount]);
+  useEffect(() => {
+    localStorage.setItem("av_bet2_amount", String(bet2.betAmount));
+  }, [bet2.betAmount]);
   useEffect(() => {
     localStorage.setItem(
       "av_history",
@@ -305,16 +373,19 @@ export default function App() {
 
     const cp = generateCrashPoint();
     crashPointRef.current = cp;
-    isBetPlacedRef.current = false;
-    cashedOutRef.current = null;
+    // Reset slot refs
+    isBetPlacedRef1.current = false;
+    cashedOutRef1.current = null;
+    isBetPlacedRef2.current = false;
+    cashedOutRef2.current = null;
     phaseRef.current = "waiting";
 
     setPhase("waiting");
     setMultiplier(1.0);
     setPlaneT(0);
-    setCashedOut(null);
-    setIsBetPlaced(false);
     setShaking(false);
+    setBet1((prev) => ({ ...prev, isBetPlaced: false, cashedOut: null }));
+    setBet2((prev) => ({ ...prev, isBetPlaced: false, cashedOut: null }));
 
     let count = WAITING_SECS;
     setCountdown(count);
@@ -342,13 +413,23 @@ export default function App() {
         setMultiplier(m);
         setPlaneT(multToT(m));
 
+        // Auto cashout slot 1
         if (
-          isBetPlacedRef.current &&
-          cashedOutRef.current === null &&
-          autoCashoutRef.current &&
-          m >= autoCashoutTargetRef.current
+          isBetPlacedRef1.current &&
+          cashedOutRef1.current === null &&
+          autoCashoutRef1.current &&
+          m >= autoCashoutTargetRef1.current
         ) {
-          doCashout(m);
+          doCashout(1, m);
+        }
+        // Auto cashout slot 2
+        if (
+          isBetPlacedRef2.current &&
+          cashedOutRef2.current === null &&
+          autoCashoutRef2.current &&
+          m >= autoCashoutTargetRef2.current
+        ) {
+          doCashout(2, m);
         }
 
         if (m >= crashPointRef.current) {
@@ -365,16 +446,22 @@ export default function App() {
       animId = requestAnimationFrame(frame);
     }
 
-    function doCashout(atMult: number) {
+    function doCashout(slot: 1 | 2, atMult: number) {
+      const isBetPlacedRef = slot === 1 ? isBetPlacedRef1 : isBetPlacedRef2;
+      const cashedOutRef = slot === 1 ? cashedOutRef1 : cashedOutRef2;
+      const betAmountRef = slot === 1 ? betAmountRef1 : betAmountRef2;
+      const setBet = slot === 1 ? setBet1 : setBet2;
+
       if (cashedOutRef.current !== null || !isBetPlacedRef.current) return;
       cashedOutRef.current = atMult;
-      setCashedOut(atMult);
+      setBet((prev) => ({ ...prev, cashedOut: atMult }));
       const win = betAmountRef.current * atMult;
       const newBal = balanceRef.current + win;
       balanceRef.current = newBal;
       setBalance(newBal);
       const rec: BetRecord = {
-        id: Date.now(),
+        id: Date.now() + slot,
+        slot,
         betAmount: betAmountRef.current,
         cashoutAt: atMult,
         profit: win - betAmountRef.current,
@@ -390,19 +477,34 @@ export default function App() {
       setCrashedAt(final);
       setShaking(true);
 
-      if (isBetPlacedRef.current && cashedOutRef.current === null) {
-        const rec: BetRecord = {
-          id: Date.now(),
-          betAmount: betAmountRef.current,
+      const now = Date.now();
+      const newRecs: BetRecord[] = [];
+      if (isBetPlacedRef1.current && cashedOutRef1.current === null) {
+        newRecs.push({
+          id: now,
+          slot: 1,
+          betAmount: betAmountRef1.current,
           cashoutAt: null,
-          profit: -betAmountRef.current,
-          timestamp: Date.now(),
-        };
-        setMyBets((prev) => [rec, ...prev].slice(0, 20));
+          profit: -betAmountRef1.current,
+          timestamp: now,
+        });
+      }
+      if (isBetPlacedRef2.current && cashedOutRef2.current === null) {
+        newRecs.push({
+          id: now + 1,
+          slot: 2,
+          betAmount: betAmountRef2.current,
+          cashoutAt: null,
+          profit: -betAmountRef2.current,
+          timestamp: now,
+        });
+      }
+      if (newRecs.length > 0) {
+        setMyBets((prev) => [...newRecs, ...prev].slice(0, 20));
       }
 
       setCrashHistory((prev) =>
-        [{ id: Date.now(), value: final }, ...prev].slice(0, 20),
+        [{ id: now, value: final }, ...prev].slice(0, 20),
       );
 
       setTimeout(() => {
@@ -420,44 +522,55 @@ export default function App() {
   }, [gameKey]);
 
   // ── Bet Handlers ──────────────────────────────────────────────────────────
-  function placeBet() {
+  function placeBet(slot: 1 | 2) {
+    const bet = slot === 1 ? bet1 : bet2;
+    const setBet = slot === 1 ? setBet1 : setBet2;
+    const isBetPlacedRef = slot === 1 ? isBetPlacedRef1 : isBetPlacedRef2;
     if (
       phase !== "waiting" ||
-      isBetPlaced ||
-      betAmount <= 0 ||
-      betAmount > balance
+      bet.isBetPlaced ||
+      bet.betAmount <= 0 ||
+      bet.betAmount > balance
     )
       return;
-    const nb = balance - betAmount;
+    const nb = balanceRef.current - bet.betAmount;
     balanceRef.current = nb;
     setBalance(nb);
     isBetPlacedRef.current = true;
-    setIsBetPlaced(true);
+    setBet((prev) => ({ ...prev, isBetPlaced: true }));
   }
 
-  function cancelBet() {
-    if (phase !== "waiting" || !isBetPlaced) return;
-    const nb = balance + betAmount;
+  function cancelBet(slot: 1 | 2) {
+    const bet = slot === 1 ? bet1 : bet2;
+    const setBet = slot === 1 ? setBet1 : setBet2;
+    const isBetPlacedRef = slot === 1 ? isBetPlacedRef1 : isBetPlacedRef2;
+    if (phase !== "waiting" || !bet.isBetPlaced) return;
+    const nb = balanceRef.current + bet.betAmount;
     balanceRef.current = nb;
     setBalance(nb);
     isBetPlacedRef.current = false;
-    setIsBetPlaced(false);
+    setBet((prev) => ({ ...prev, isBetPlaced: false }));
   }
 
-  function cashOut() {
+  function cashOut(slot: 1 | 2) {
+    const bet = slot === 1 ? bet1 : bet2;
+    const isBetPlacedRef = slot === 1 ? isBetPlacedRef1 : isBetPlacedRef2;
+    const cashedOutRef = slot === 1 ? cashedOutRef1 : cashedOutRef2;
+    const setBet = slot === 1 ? setBet1 : setBet2;
     if (!isBetPlacedRef.current || cashedOutRef.current !== null) return;
     const atMult = multiplier;
     cashedOutRef.current = atMult;
-    setCashedOut(atMult);
-    const win = betAmount * atMult;
-    const nb = balance + win;
+    setBet((prev) => ({ ...prev, cashedOut: atMult }));
+    const win = bet.betAmount * atMult;
+    const nb = balanceRef.current + win;
     balanceRef.current = nb;
     setBalance(nb);
     const rec: BetRecord = {
-      id: Date.now(),
-      betAmount,
+      id: Date.now() + slot,
+      slot,
+      betAmount: bet.betAmount,
       cashoutAt: atMult,
-      profit: win - betAmount,
+      profit: win - bet.betAmount,
       timestamp: Date.now(),
     };
     setMyBets((prev) => [rec, ...prev].slice(0, 20));
@@ -466,6 +579,30 @@ export default function App() {
   function resetBalance() {
     balanceRef.current = 1000;
     setBalance(1000);
+  }
+
+  function handleWalletSubmit() {
+    const amt = Number.parseFloat(walletAmount);
+    if (Number.isNaN(amt) || amt <= 0) {
+      setWalletMsg({ type: "err", text: "সঠিক পরিমাণ লিখুন" });
+      return;
+    }
+    if (walletTab === "deposit") {
+      const newBal = balanceRef.current + amt;
+      balanceRef.current = newBal;
+      setBalance(newBal);
+      setWalletMsg({ type: "ok", text: `${amt} CR জমা হয়েছে` });
+    } else {
+      if (amt > balanceRef.current) {
+        setWalletMsg({ type: "err", text: "পর্যাপ্ত ব্যালেন্স নেই" });
+        return;
+      }
+      const newBal = balanceRef.current - amt;
+      balanceRef.current = newBal;
+      setBalance(newBal);
+      setWalletMsg({ type: "ok", text: `${amt} CR উত্তোলন হয়েছে` });
+    }
+    setWalletAmount("");
   }
 
   // ── Derived values ────────────────────────────────────────────────────────
@@ -485,11 +622,344 @@ export default function App() {
           : "#9DFF3A";
   const multGlowClass = phase === "crashed" ? "glow-red" : "glow-green";
 
-  const canBet =
-    phase === "waiting" &&
-    !isBetPlaced &&
-    betAmount > 0 &&
-    betAmount <= balance;
+  // ── Bet Panel ─────────────────────────────────────────────────────────────
+  function BetPanel({ slot }: { slot: 1 | 2 }) {
+    const bet = slot === 1 ? bet1 : bet2;
+    const setBet = slot === 1 ? setBet1 : setBet2;
+    const label = `Bet ${slot}`;
+    const ocidPrefix = slot === 1 ? "bet1" : "bet2";
+
+    const canBet =
+      phase === "waiting" &&
+      !bet.isBetPlaced &&
+      bet.betAmount > 0 &&
+      bet.betAmount <= balance;
+
+    return (
+      <div className="flex-1 min-w-0 rounded-2xl border border-[#1e2e48] bg-[#0d1526] p-2.5 flex flex-col gap-2">
+        {/* Header */}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <span
+              className={cn(
+                "inline-flex items-center justify-center w-5 h-5 rounded-full text-[9px] font-black",
+                slot === 1
+                  ? "bg-amber-400/20 text-amber-400 border border-amber-400/40"
+                  : "bg-[#9DFF3A]/20 text-[#9DFF3A] border border-[#9DFF3A]/40",
+              )}
+            >
+              {slot}
+            </span>
+            <h3 className="text-[10px] uppercase tracking-[0.25em] text-[#9AA7BD] font-bold">
+              {label}
+            </h3>
+          </div>
+          {bet.isBetPlaced && !bet.cashedOut && phase === "waiting" && (
+            <span className="text-[9px] text-[#9DFF3A] font-bold uppercase tracking-wider">
+              ● PLACED
+            </span>
+          )}
+        </div>
+
+        {/* Amount stepper */}
+        <div className="flex items-center gap-1.5">
+          <StepBtn
+            onClick={() =>
+              setBet((prev) => ({
+                ...prev,
+                betAmount: Math.max(1, prev.betAmount - 1),
+              }))
+            }
+            disabled={phase !== "waiting" || bet.isBetPlaced}
+          >
+            −
+          </StepBtn>
+          <div className="flex-1">
+            <Input
+              type="number"
+              value={bet.betAmount}
+              onChange={(e) => {
+                const v = Number.parseFloat(e.target.value);
+                if (!Number.isNaN(v))
+                  setBet((prev) => ({
+                    ...prev,
+                    betAmount: Math.max(1, Math.min(balance, v)),
+                  }));
+              }}
+              disabled={phase !== "waiting" || bet.isBetPlaced}
+              min={1}
+              max={balance}
+              className="text-center font-black text-sm bg-[#070D1B] border-[#24314A] text-white font-mono h-8 disabled:opacity-60 focus:border-[#9DFF3A]/50"
+              data-ocid={`${ocidPrefix}.input`}
+            />
+          </div>
+          <StepBtn
+            onClick={() =>
+              setBet((prev) => ({
+                ...prev,
+                betAmount: Math.min(balance, prev.betAmount + 1),
+              }))
+            }
+            disabled={phase !== "waiting" || bet.isBetPlaced}
+          >
+            +
+          </StepBtn>
+        </div>
+
+        {/* Quick chips */}
+        <div className="flex gap-1.5 flex-wrap">
+          {[10, 25, 50, 100].map((amt) => (
+            <Chip
+              key={amt}
+              label={String(amt)}
+              onClick={() =>
+                setBet((prev) => ({
+                  ...prev,
+                  betAmount: Math.min(balance, amt),
+                }))
+              }
+              disabled={phase !== "waiting" || bet.isBetPlaced || amt > balance}
+            />
+          ))}
+          <Chip
+            label="½"
+            onClick={() =>
+              setBet((prev) => ({
+                ...prev,
+                betAmount: Math.max(1, Math.floor(balance / 2)),
+              }))
+            }
+            disabled={phase !== "waiting" || bet.isBetPlaced || balance < 2}
+          />
+          <Chip
+            label="MAX"
+            onClick={() =>
+              setBet((prev) => ({ ...prev, betAmount: Math.floor(balance) }))
+            }
+            disabled={phase !== "waiting" || bet.isBetPlaced || balance < 1}
+          />
+        </div>
+
+        {/* Auto Cashout */}
+        <div className="bg-[#070D1B] border border-[#1e2e48] rounded-xl p-2 space-y-1.5">
+          <div className="flex items-center justify-between">
+            <Label className="text-xs font-semibold text-[#E8EEF9] cursor-pointer">
+              Auto Cash Out
+            </Label>
+            <Switch
+              checked={bet.autoCashout}
+              onCheckedChange={(v) =>
+                setBet((prev) => ({ ...prev, autoCashout: v }))
+              }
+              data-ocid={`${ocidPrefix}.switch`}
+            />
+          </div>
+
+          {bet.autoCashout && (
+            <motion.div
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: "auto" }}
+              className="flex items-center gap-2"
+            >
+              <span className="text-[10px] text-[#9AA7BD] whitespace-nowrap uppercase tracking-wide">
+                Target:
+              </span>
+              <div className="flex items-center gap-1.5 flex-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const v = Math.max(
+                      1.1,
+                      Number.parseFloat(
+                        (bet.autoCashoutTarget - 0.1).toFixed(2),
+                      ),
+                    );
+                    setBet((prev) => ({
+                      ...prev,
+                      autoCashoutTarget: v,
+                      autoCashoutInput: v.toFixed(2),
+                    }));
+                  }}
+                  className="w-7 h-7 rounded-lg bg-[#111A2B] border border-[#24314A] text-white text-sm hover:bg-[#1a2540] transition-colors flex items-center justify-center"
+                >
+                  −
+                </button>
+                <Input
+                  type="number"
+                  value={bet.autoCashoutInput}
+                  onChange={(e) => {
+                    const raw = e.target.value;
+                    setBet((prev) => ({ ...prev, autoCashoutInput: raw }));
+                    const v = Number.parseFloat(raw);
+                    if (!Number.isNaN(v) && v >= 1.1) {
+                      setBet((prev) => ({
+                        ...prev,
+                        autoCashoutTarget: v,
+                      }));
+                    }
+                  }}
+                  step={0.1}
+                  min={1.1}
+                  className="w-20 text-center font-black font-mono bg-[#111A2B] border-[#24314A] text-[#9DFF3A] h-7 text-xs focus:border-[#9DFF3A]/60"
+                  data-ocid={`${ocidPrefix}.input`}
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    const v = Number.parseFloat(
+                      (bet.autoCashoutTarget + 0.1).toFixed(2),
+                    );
+                    setBet((prev) => ({
+                      ...prev,
+                      autoCashoutTarget: v,
+                      autoCashoutInput: v.toFixed(2),
+                    }));
+                  }}
+                  className="w-7 h-7 rounded-lg bg-[#111A2B] border border-[#24314A] text-white text-sm hover:bg-[#1a2540] transition-colors flex items-center justify-center"
+                >
+                  +
+                </button>
+                <span className="text-[#9DFF3A] font-mono font-black text-sm">
+                  x
+                </span>
+              </div>
+            </motion.div>
+          )}
+        </div>
+
+        {/* Action Button */}
+        <AnimatePresence mode="wait">
+          {phase === "waiting" && !bet.isBetPlaced && (
+            <motion.button
+              key={`${ocidPrefix}-bet-btn`}
+              type="button"
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -8 }}
+              transition={{ duration: 0.18 }}
+              onClick={() => placeBet(slot)}
+              disabled={!canBet}
+              className={cn(
+                "w-full h-9 rounded-xl font-black text-xs uppercase tracking-widest transition-all duration-150 active:scale-[0.98] text-black disabled:opacity-40 disabled:cursor-not-allowed shadow-lg",
+                slot === 1
+                  ? "bg-[#F59E0B] hover:bg-[#FBBF24]"
+                  : "bg-[#9DFF3A] hover:bg-[#B0FF55]",
+              )}
+              style={{
+                boxShadow: canBet
+                  ? slot === 1
+                    ? "0 4px 20px rgba(245,158,11,0.35)"
+                    : "0 4px 20px rgba(157,255,58,0.35)"
+                  : "none",
+              }}
+              data-ocid={`${ocidPrefix}.primary_button`}
+            >
+              BET {fmt(bet.betAmount)}
+            </motion.button>
+          )}
+
+          {phase === "waiting" && bet.isBetPlaced && (
+            <motion.div
+              key={`${ocidPrefix}-placed`}
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -8 }}
+              className="space-y-1.5"
+            >
+              <div className="w-full h-8 rounded-xl font-black text-[10px] uppercase tracking-wider bg-[#9DFF3A]/10 border border-[#9DFF3A]/30 text-[#9DFF3A] flex items-center justify-center gap-2">
+                <svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 16 16"
+                  fill="none"
+                  aria-hidden="true"
+                >
+                  <circle
+                    cx="8"
+                    cy="8"
+                    r="7"
+                    stroke="#9DFF3A"
+                    strokeWidth="1.5"
+                  />
+                  <path
+                    d="M5 8L7 10L11 6"
+                    stroke="#9DFF3A"
+                    strokeWidth="1.5"
+                    strokeLinecap="round"
+                  />
+                </svg>
+                {fmt(bet.betAmount)} Placed
+              </div>
+              <button
+                type="button"
+                onClick={() => cancelBet(slot)}
+                className="w-full py-1.5 text-xs text-[#9AA7BD] hover:text-white transition-colors"
+                data-ocid={`${ocidPrefix}.cancel_button`}
+              >
+                Cancel Bet
+              </button>
+            </motion.div>
+          )}
+
+          {phase === "flying" && bet.isBetPlaced && bet.cashedOut === null && (
+            <motion.button
+              key={`${ocidPrefix}-cashout-btn`}
+              type="button"
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => cashOut(slot)}
+              className="w-full h-10 rounded-xl font-black text-xs uppercase tracking-widest transition-all duration-100 bg-[#9DFF3A] hover:bg-[#B0FF55] active:scale-[0.97] text-black neon-pulse"
+              data-ocid={`${ocidPrefix}.primary_button`}
+            >
+              CASH OUT @ {multiplier.toFixed(2)}x
+              <div className="text-[10px] font-semibold opacity-75 mt-0.5 normal-case">
+                = {fmt(bet.betAmount * multiplier)} cr
+              </div>
+            </motion.button>
+          )}
+
+          {phase === "flying" && bet.isBetPlaced && bet.cashedOut !== null && (
+            <motion.div
+              key={`${ocidPrefix}-cashed`}
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              className="w-full h-10 rounded-xl font-black text-[10px] uppercase tracking-wider bg-[#9DFF3A]/10 border border-[#9DFF3A]/30 text-[#9DFF3A] flex flex-col items-center justify-center"
+            >
+              <span>✓ @ {bet.cashedOut.toFixed(2)}x</span>
+              <span className="text-[10px] font-medium opacity-70 mt-0.5 normal-case">
+                +{fmt(bet.betAmount * bet.cashedOut - bet.betAmount)} profit
+              </span>
+            </motion.div>
+          )}
+
+          {phase === "flying" && !bet.isBetPlaced && (
+            <div
+              key={`${ocidPrefix}-flying-idle`}
+              className="w-full h-12 rounded-xl bg-[#070D1B] border border-[#1e2e48] text-[#9AA7BD] flex items-center justify-center text-xs font-semibold uppercase tracking-wider"
+              data-ocid={`${ocidPrefix}.loading_state`}
+            >
+              Round in progress…
+            </div>
+          )}
+
+          {phase === "crashed" && (
+            <div
+              key={`${ocidPrefix}-crashed`}
+              className="w-full h-12 rounded-xl bg-[#FF3B3B]/10 border border-[#FF3B3B]/25 text-[#FF6666] flex items-center justify-center text-xs font-bold uppercase tracking-wider"
+              data-ocid={`${ocidPrefix}.error_state`}
+            >
+              {bet.isBetPlaced && bet.cashedOut === null
+                ? `Lost ${fmt(bet.betAmount)}`
+                : bet.cashedOut !== null
+                  ? `Won @ ${bet.cashedOut.toFixed(2)}x`
+                  : `Crashed @ ${crashedAt.toFixed(2)}x`}
+            </div>
+          )}
+        </AnimatePresence>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-[#0B1020] text-[#E8EEF9] flex flex-col">
@@ -528,6 +998,32 @@ export default function App() {
                 Refill 1000
               </button>
             )}
+            <button
+              type="button"
+              onClick={() => {
+                setWalletTab("deposit");
+                setWalletMsg(null);
+                setWalletAmount("");
+                setShowWalletModal(true);
+              }}
+              className="text-xs text-[#9DFF3A] border border-[#9DFF3A]/40 hover:border-[#9DFF3A]/80 hover:bg-[#9DFF3A]/10 rounded-lg px-3 py-1.5 transition-colors font-semibold"
+              data-ocid="nav.deposit"
+            >
+              + Deposit
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setWalletTab("withdraw");
+                setWalletMsg(null);
+                setWalletAmount("");
+                setShowWalletModal(true);
+              }}
+              className="text-xs text-red-400 border border-red-400/40 hover:border-red-400/80 hover:bg-red-400/10 rounded-lg px-3 py-1.5 transition-colors font-semibold"
+              data-ocid="nav.withdraw"
+            >
+              Withdraw
+            </button>
             <div className="flex items-center gap-2 bg-[#111A2B] border border-[#24314A] rounded-xl px-4 py-2">
               <svg
                 width="14"
@@ -563,6 +1059,106 @@ export default function App() {
           </div>
         </div>
       </nav>
+
+      {/* ── Wallet Modal ── */}
+      {showWalletModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">
+          <dialog
+            open
+            aria-modal="true"
+            className="bg-[#0d1526] border border-[#24314A] rounded-2xl p-6 w-full max-w-sm mx-4 shadow-2xl relative"
+          >
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-white font-bold text-lg">ওয়ালেট</h2>
+              <button
+                type="button"
+                onClick={() => setShowWalletModal(false)}
+                className="text-[#9AA7BD] hover:text-white text-xl leading-none"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="flex gap-2 mb-5">
+              <button
+                type="button"
+                onClick={() => {
+                  setWalletTab("deposit");
+                  setWalletMsg(null);
+                }}
+                className={`flex-1 py-2 rounded-lg font-semibold text-sm transition-colors ${walletTab === "deposit" ? "bg-[#9DFF3A] text-black" : "bg-[#111A2B] text-[#9AA7BD] hover:text-white"}`}
+              >
+                💰 Deposit
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setWalletTab("withdraw");
+                  setWalletMsg(null);
+                }}
+                className={`flex-1 py-2 rounded-lg font-semibold text-sm transition-colors ${walletTab === "withdraw" ? "bg-red-500 text-white" : "bg-[#111A2B] text-[#9AA7BD] hover:text-white"}`}
+              >
+                💸 Withdraw
+              </button>
+            </div>
+            <div className="mb-3">
+              <p className="text-[#9AA7BD] text-xs mb-1">বর্তমান ব্যালেন্স</p>
+              <p className="text-[#9DFF3A] font-black text-2xl font-mono">
+                {fmt(balance)}{" "}
+                <span className="text-sm font-normal text-[#9AA7BD]">CR</span>
+              </p>
+            </div>
+            <div className="mb-3">
+              <label
+                htmlFor="wallet-amount-input"
+                className="text-[#9AA7BD] text-xs mb-1 block"
+              >
+                {walletTab === "deposit" ? "জমার পরিমাণ" : "উত্তোলনের পরিমাণ"} (CR)
+              </label>
+              <input
+                type="number"
+                min="1"
+                value={walletAmount}
+                onChange={(e) => {
+                  setWalletAmount(e.target.value);
+                  setWalletMsg(null);
+                }}
+                id="wallet-amount-input"
+                className="w-full bg-[#111A2B] border border-[#24314A] text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[#9DFF3A]/50"
+                placeholder="পরিমাণ লিখুন..."
+              />
+            </div>
+            <div className="flex flex-wrap gap-2 mb-4">
+              {[100, 250, 500, 1000].map((q) => (
+                <button
+                  key={q}
+                  type="button"
+                  onClick={() => {
+                    setWalletAmount(String(q));
+                    setWalletMsg(null);
+                  }}
+                  className="flex-1 bg-[#111A2B] border border-[#24314A] hover:border-[#9DFF3A]/40 text-white text-xs rounded-lg py-1.5 transition-colors"
+                >
+                  {q}
+                </button>
+              ))}
+            </div>
+            {walletMsg && (
+              <p
+                className={`text-xs mb-3 text-center font-semibold ${walletMsg.type === "ok" ? "text-[#9DFF3A]" : "text-red-400"}`}
+              >
+                {walletMsg.text}
+              </p>
+            )}
+            <button
+              type="button"
+              onClick={handleWalletSubmit}
+              className={`w-full py-2.5 rounded-xl font-bold text-sm transition-colors ${walletTab === "deposit" ? "bg-[#9DFF3A] text-black hover:bg-[#b5ff6e]" : "bg-red-500 text-white hover:bg-red-400"}`}
+            >
+              {walletTab === "deposit" ? "জমা করুন" : "উত্তোলন করুন"}
+            </button>
+          </dialog>
+        </div>
+      )}
 
       {/* ── Main ── */}
       <main className="flex-1 max-w-5xl mx-auto w-full px-4 py-5 space-y-4">
@@ -751,7 +1347,7 @@ export default function App() {
                       {countdown}
                     </div>
                     <div className="mt-4 text-sm">
-                      {isBetPlaced ? (
+                      {bet1.isBetPlaced || bet2.isBetPlaced ? (
                         <span className="text-[#9DFF3A] font-semibold flex items-center gap-1.5 justify-center">
                           <svg
                             width="14"
@@ -774,11 +1370,15 @@ export default function App() {
                               strokeLinecap="round"
                             />
                           </svg>
-                          Bet of {fmt(betAmount)} placed
+                          {bet1.isBetPlaced && bet2.isBetPlaced
+                            ? `Both bets placed · ${fmt(bet1.betAmount + bet2.betAmount)}`
+                            : bet1.isBetPlaced
+                              ? `Bet 1 placed · ${fmt(bet1.betAmount)}`
+                              : `Bet 2 placed · ${fmt(bet2.betAmount)}`}
                         </span>
                       ) : (
                         <span className="text-[#9AA7BD]">
-                          Place your bet below
+                          Place your bets below
                         </span>
                       )}
                     </div>
@@ -807,39 +1407,37 @@ export default function App() {
                     >
                       {multiplier.toFixed(2)}x
                     </div>
-                    {cashedOut !== null && (
-                      <motion.div
-                        initial={{ opacity: 0, y: 8 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        className="mt-3 inline-flex items-center gap-2 bg-[#9DFF3A]/15 border border-[#9DFF3A]/30 rounded-full px-4 py-1.5"
-                      >
-                        <svg
-                          width="12"
-                          height="12"
-                          viewBox="0 0 12 12"
-                          fill="none"
-                          aria-hidden="true"
+                    {/* Show cashout badges */}
+                    <div className="flex flex-col items-center gap-1 mt-2">
+                      {bet1.cashedOut !== null && (
+                        <motion.div
+                          initial={{ opacity: 0, y: 8 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          className="inline-flex items-center gap-2 bg-[#9DFF3A]/15 border border-[#9DFF3A]/30 rounded-full px-3 py-1"
                         >
-                          <circle
-                            cx="6"
-                            cy="6"
-                            r="5"
-                            stroke="#9DFF3A"
-                            strokeWidth="1.5"
-                          />
-                          <path
-                            d="M3.5 6L5 7.5L8.5 4"
-                            stroke="#9DFF3A"
-                            strokeWidth="1.5"
-                            strokeLinecap="round"
-                          />
-                        </svg>
-                        <span className="text-[#9DFF3A] font-bold text-xs">
-                          Cashed out @ {cashedOut.toFixed(2)}x · +
-                          {fmt(betAmount * cashedOut - betAmount)}
-                        </span>
-                      </motion.div>
-                    )}
+                          <span className="text-[#9DFF3A] font-bold text-xs">
+                            Bet 1 @ {bet1.cashedOut.toFixed(2)}x · +
+                            {fmt(
+                              bet1.betAmount * bet1.cashedOut - bet1.betAmount,
+                            )}
+                          </span>
+                        </motion.div>
+                      )}
+                      {bet2.cashedOut !== null && (
+                        <motion.div
+                          initial={{ opacity: 0, y: 8 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          className="inline-flex items-center gap-2 bg-[#9DFF3A]/15 border border-[#9DFF3A]/30 rounded-full px-3 py-1"
+                        >
+                          <span className="text-[#9DFF3A] font-bold text-xs">
+                            Bet 2 @ {bet2.cashedOut.toFixed(2)}x · +
+                            {fmt(
+                              bet2.betAmount * bet2.cashedOut - bet2.betAmount,
+                            )}
+                          </span>
+                        </motion.div>
+                      )}
+                    </div>
                   </motion.div>
                 )}
 
@@ -864,9 +1462,19 @@ export default function App() {
                     >
                       {crashedAt.toFixed(2)}x
                     </div>
-                    {isBetPlaced && cashedOut === null && (
+                    {((bet1.isBetPlaced && bet1.cashedOut === null) ||
+                      (bet2.isBetPlaced && bet2.cashedOut === null)) && (
                       <div className="mt-3 text-[#FF7777] text-sm font-semibold">
-                        Lost {fmt(betAmount)} credits
+                        Lost{" "}
+                        {fmt(
+                          (bet1.isBetPlaced && bet1.cashedOut === null
+                            ? bet1.betAmount
+                            : 0) +
+                            (bet2.isBetPlaced && bet2.cashedOut === null
+                              ? bet2.betAmount
+                              : 0),
+                        )}{" "}
+                        credits
                       </div>
                     )}
                   </motion.div>
@@ -876,276 +1484,10 @@ export default function App() {
           </div>
         </div>
 
-        {/* ── Bet Controls ── */}
-        <div className="rounded-2xl border border-[#1e2e48] bg-[#0d1526] p-5">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-[10px] uppercase tracking-[0.25em] text-[#9AA7BD] font-bold">
-              BET AMOUNT
-            </h3>
-            <span className="text-xs text-[#9AA7BD] font-mono">
-              Balance:{" "}
-              <span className="text-[#9DFF3A] font-bold">{fmt(balance)}</span>
-            </span>
-          </div>
-
-          <div className="space-y-4">
-            {/* Amount stepper */}
-            <div className="flex items-center gap-2">
-              <StepBtn
-                onClick={() => setBetAmount((v) => Math.max(1, v - 1))}
-                disabled={phase !== "waiting" || isBetPlaced}
-              >
-                −
-              </StepBtn>
-              <div className="flex-1">
-                <Input
-                  type="number"
-                  value={betAmount}
-                  onChange={(e) => {
-                    const v = Number.parseFloat(e.target.value);
-                    if (!Number.isNaN(v))
-                      setBetAmount(Math.max(1, Math.min(balance, v)));
-                  }}
-                  disabled={phase !== "waiting" || isBetPlaced}
-                  min={1}
-                  max={balance}
-                  className="text-center font-black text-xl bg-[#070D1B] border-[#24314A] text-white font-mono h-11 disabled:opacity-60 focus:border-[#9DFF3A]/50"
-                  data-ocid="bet.input"
-                />
-              </div>
-              <StepBtn
-                onClick={() => setBetAmount((v) => Math.min(balance, v + 1))}
-                disabled={phase !== "waiting" || isBetPlaced}
-              >
-                +
-              </StepBtn>
-            </div>
-
-            {/* Quick chips */}
-            <div className="flex gap-2 flex-wrap">
-              {[10, 25, 50, 100, 200].map((amt) => (
-                <Chip
-                  key={amt}
-                  label={String(amt)}
-                  onClick={() => setBetAmount(Math.min(balance, amt))}
-                  disabled={phase !== "waiting" || isBetPlaced || amt > balance}
-                />
-              ))}
-              <Chip
-                label="½"
-                onClick={() =>
-                  setBetAmount(Math.max(1, Math.floor(balance / 2)))
-                }
-                disabled={phase !== "waiting" || isBetPlaced || balance < 2}
-              />
-              <Chip
-                label="MAX"
-                onClick={() => setBetAmount(Math.floor(balance))}
-                disabled={phase !== "waiting" || isBetPlaced || balance < 1}
-              />
-            </div>
-
-            {/* Auto Cashout */}
-            <div className="bg-[#070D1B] border border-[#1e2e48] rounded-xl p-3.5 space-y-3">
-              <div className="flex items-center justify-between">
-                <div>
-                  <Label className="text-sm font-semibold text-[#E8EEF9] cursor-pointer">
-                    Auto Cash Out
-                  </Label>
-                  <p className="text-xs text-[#9AA7BD] mt-0.5">
-                    Auto cash out at target multiplier
-                  </p>
-                </div>
-                <Switch
-                  checked={autoCashout}
-                  onCheckedChange={setAutoCashout}
-                  data-ocid="bet.switch"
-                />
-              </div>
-
-              {autoCashout && (
-                <motion.div
-                  initial={{ opacity: 0, height: 0 }}
-                  animate={{ opacity: 1, height: "auto" }}
-                  className="flex items-center gap-3"
-                >
-                  <span className="text-xs text-[#9AA7BD] whitespace-nowrap uppercase tracking-wide">
-                    Target:
-                  </span>
-                  <div className="flex items-center gap-2 flex-1">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const v = Math.max(
-                          1.1,
-                          Number.parseFloat(
-                            (autoCashoutTarget - 0.1).toFixed(2),
-                          ),
-                        );
-                        setAutoCashoutTarget(v);
-                        setAutoCashoutInput(v.toFixed(2));
-                      }}
-                      className="w-8 h-8 rounded-lg bg-[#111A2B] border border-[#24314A] text-white text-sm hover:bg-[#1a2540] transition-colors flex items-center justify-center"
-                    >
-                      −
-                    </button>
-                    <Input
-                      type="number"
-                      value={autoCashoutInput}
-                      onChange={(e) => {
-                        setAutoCashoutInput(e.target.value);
-                        const v = Number.parseFloat(e.target.value);
-                        if (!Number.isNaN(v) && v >= 1.1) {
-                          setAutoCashoutTarget(v);
-                          autoCashoutTargetRef.current = v;
-                        }
-                      }}
-                      step={0.1}
-                      min={1.1}
-                      className="w-24 text-center font-black font-mono bg-[#111A2B] border-[#24314A] text-[#9DFF3A] h-8 text-sm focus:border-[#9DFF3A]/60"
-                      data-ocid="bet.input"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const v = Number.parseFloat(
-                          (autoCashoutTarget + 0.1).toFixed(2),
-                        );
-                        setAutoCashoutTarget(v);
-                        setAutoCashoutInput(v.toFixed(2));
-                      }}
-                      className="w-8 h-8 rounded-lg bg-[#111A2B] border border-[#24314A] text-white text-sm hover:bg-[#1a2540] transition-colors flex items-center justify-center"
-                    >
-                      +
-                    </button>
-                    <span className="text-[#9DFF3A] font-mono font-black">
-                      x
-                    </span>
-                  </div>
-                </motion.div>
-              )}
-            </div>
-
-            {/* Action Button */}
-            <AnimatePresence mode="wait">
-              {phase === "waiting" && !isBetPlaced && (
-                <motion.button
-                  key="bet-btn"
-                  type="button"
-                  initial={{ opacity: 0, y: 8 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -8 }}
-                  transition={{ duration: 0.18 }}
-                  onClick={placeBet}
-                  disabled={!canBet}
-                  className="w-full h-14 rounded-xl font-black text-base uppercase tracking-widest transition-all duration-150 bg-[#F59E0B] hover:bg-[#FBBF24] active:scale-[0.98] text-black disabled:opacity-40 disabled:cursor-not-allowed shadow-lg"
-                  style={{
-                    boxShadow: canBet
-                      ? "0 4px 20px rgba(245,158,11,0.35)"
-                      : "none",
-                  }}
-                  data-ocid="bet.primary_button"
-                >
-                  BET {fmt(betAmount)} CREDITS
-                </motion.button>
-              )}
-
-              {phase === "waiting" && isBetPlaced && (
-                <motion.div
-                  key="bet-placed"
-                  initial={{ opacity: 0, y: 8 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -8 }}
-                  className="space-y-2"
-                >
-                  <div className="w-full h-14 rounded-xl font-black text-sm uppercase tracking-wider bg-[#9DFF3A]/10 border border-[#9DFF3A]/30 text-[#9DFF3A] flex items-center justify-center gap-2">
-                    <svg
-                      width="16"
-                      height="16"
-                      viewBox="0 0 16 16"
-                      fill="none"
-                      aria-hidden="true"
-                    >
-                      <circle
-                        cx="8"
-                        cy="8"
-                        r="7"
-                        stroke="#9DFF3A"
-                        strokeWidth="1.5"
-                      />
-                      <path
-                        d="M5 8L7 10L11 6"
-                        stroke="#9DFF3A"
-                        strokeWidth="1.5"
-                        strokeLinecap="round"
-                      />
-                    </svg>
-                    Bet Placed — {fmt(betAmount)} Credits
-                  </div>
-                  <button
-                    type="button"
-                    onClick={cancelBet}
-                    className="w-full py-2 text-sm text-[#9AA7BD] hover:text-white transition-colors"
-                    data-ocid="bet.cancel_button"
-                  >
-                    Cancel Bet
-                  </button>
-                </motion.div>
-              )}
-
-              {phase === "flying" && isBetPlaced && cashedOut === null && (
-                <motion.button
-                  key="cashout-btn"
-                  type="button"
-                  initial={{ opacity: 0, scale: 0.95 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  exit={{ opacity: 0 }}
-                  onClick={cashOut}
-                  className="w-full h-16 rounded-xl font-black text-lg uppercase tracking-widest transition-all duration-100 bg-[#9DFF3A] hover:bg-[#B0FF55] active:scale-[0.97] text-black neon-pulse"
-                  data-ocid="bet.primary_button"
-                >
-                  CASH OUT @ {multiplier.toFixed(2)}x
-                  <div className="text-xs font-semibold opacity-75 mt-0.5 normal-case">
-                    = {fmt(betAmount * multiplier)} credits
-                  </div>
-                </motion.button>
-              )}
-
-              {phase === "flying" && isBetPlaced && cashedOut !== null && (
-                <motion.div
-                  key="cashed-out"
-                  initial={{ opacity: 0, scale: 0.95 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  className="w-full h-16 rounded-xl font-black text-sm uppercase tracking-wider bg-[#9DFF3A]/10 border border-[#9DFF3A]/30 text-[#9DFF3A] flex flex-col items-center justify-center"
-                >
-                  <span>✓ Cashed Out @ {cashedOut.toFixed(2)}x</span>
-                  <span className="text-xs font-medium opacity-70 mt-0.5 normal-case">
-                    +{fmt(betAmount * cashedOut - betAmount)} profit
-                  </span>
-                </motion.div>
-              )}
-
-              {phase === "flying" && !isBetPlaced && (
-                <div
-                  key="flying-idle"
-                  className="w-full h-14 rounded-xl bg-[#070D1B] border border-[#1e2e48] text-[#9AA7BD] flex items-center justify-center text-sm font-semibold uppercase tracking-wider"
-                  data-ocid="bet.loading_state"
-                >
-                  Round in progress…
-                </div>
-              )}
-
-              {phase === "crashed" && (
-                <div
-                  key="crashed-state"
-                  className="w-full h-14 rounded-xl bg-[#FF3B3B]/10 border border-[#FF3B3B]/25 text-[#FF6666] flex items-center justify-center text-sm font-bold uppercase tracking-wider"
-                  data-ocid="bet.error_state"
-                >
-                  Crashed @ {crashedAt.toFixed(2)}x — Next round starting…
-                </div>
-              )}
-            </AnimatePresence>
-          </div>
+        {/* ── Dual Bet Controls ── */}
+        <div className="flex flex-col sm:flex-row gap-3">
+          <BetPanel slot={1} />
+          <BetPanel slot={2} />
         </div>
 
         {/* ── Bet History ── */}
@@ -1175,7 +1517,7 @@ export default function App() {
                 <TableHeader>
                   <TableRow className="border-b-[#1e2e48] hover:bg-transparent">
                     <TableHead className="text-[#9AA7BD] text-[10px] uppercase tracking-widest font-bold pl-5">
-                      #
+                      Slot
                     </TableHead>
                     <TableHead className="text-[#9AA7BD] text-[10px] uppercase tracking-widest font-bold">
                       Bet
@@ -1195,8 +1537,17 @@ export default function App() {
                       className="border-b-[#1a2840] hover:bg-[#0a1220] transition-colors"
                       data-ocid={`bets.item.${i + 1}`}
                     >
-                      <TableCell className="text-[#9AA7BD] text-xs font-mono pl-5">
-                        {myBets.length - i}
+                      <TableCell className="pl-5">
+                        <span
+                          className={cn(
+                            "inline-flex items-center justify-center w-14 h-5 rounded-full text-[9px] font-black uppercase tracking-wide",
+                            bet.slot === 1
+                              ? "bg-amber-400/15 text-amber-400 border border-amber-400/30"
+                              : "bg-[#9DFF3A]/15 text-[#9DFF3A] border border-[#9DFF3A]/30",
+                          )}
+                        >
+                          Bet {bet.slot}
+                        </span>
                       </TableCell>
                       <TableCell className="font-mono font-semibold text-[#E8EEF9] text-sm">
                         {fmt(bet.betAmount)}
@@ -1259,5 +1610,27 @@ export default function App() {
         </div>
       </footer>
     </div>
+  );
+}
+
+// ─── Root App ──────────────────────────────────────────────────────────────────
+export default function App() {
+  const [showGame, setShowGame] = useState(false);
+
+  return (
+    <AnimatePresence mode="wait">
+      {!showGame ? (
+        <HomePage key="home" onEnter={() => setShowGame(true)} />
+      ) : (
+        <motion.div
+          key="game"
+          initial={{ opacity: 0, scale: 1.03 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={{ duration: 0.5 }}
+        >
+          <AviatorGame />
+        </motion.div>
+      )}
+    </AnimatePresence>
   );
 }
